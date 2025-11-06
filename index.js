@@ -1,12 +1,5 @@
-import 'dotenv/config';
-import express from "express";
-import { Client, GatewayIntentBits } from "discord.js";
+import { Client, GatewayIntentBits, Events } from "discord.js";
 import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice";
-
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get("/", (_req, res) => res.send("OK"));
-app.listen(PORT, () => console.log(`[WEB] listening on ${PORT}`));
 
 const client = new Client({
   intents: [
@@ -17,29 +10,33 @@ const client = new Client({
   ]
 });
 
-const OWNER_ID = process.env.OWNER_ID;
+const TARGET_USER_ID = process.env.TARGET_USER_ID; // 너 디스코드 ID
+const TOKEN = process.env.TOKEN;
 
-client.on("voiceStateUpdate", (oldState, newState) => {
-  // 들어왔을 때 봇이 아님 + 방 입장
-  if (!oldState.channelId && newState.channelId && newState.id === OWNER_ID) {
+client.once(Events.ClientReady, () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+  // 들어옴 감지
+  if (newState.id === TARGET_USER_ID && newState.channel) {
+    console.log("🎧 대상 유저 입장 → 봇 입장 시도");
+
     joinVoiceChannel({
       channelId: newState.channel.id,
       guildId: newState.guild.id,
-      adapterCreator: newState.guild.voiceAdapterCreator
+      adapterCreator: newState.guild.voiceAdapterCreator,
+      selfDeaf: false,
+      selfMute: false
     });
-    console.log(">>> 주인 입장 → 봇 따라감");
   }
 
-  // 나갔을 때
-  if (oldState.channelId && !newState.channelId && oldState.id === OWNER_ID) {
-    const conn = getVoiceConnection(oldState.guild.id);
-    if (conn) conn.destroy();
-    console.log(">>> 주인 퇴장 → 봇도 나감");
+  // 나감 감지 → 봇도 나감
+  const connection = getVoiceConnection(oldState.guild.id);
+  if (oldState.id === TARGET_USER_ID && oldState.channel && !newState.channel) {
+    console.log("🚪 대상 유저 퇴장 → 봇도 퇴장");
+    if (connection) connection.destroy();
   }
 });
 
-client.once("ready", () => {
-  console.log(`✅ 로그인 완료: ${client.user.tag}`);
-});
-
-client.login(process.env.TOKEN);
+client.login(TOKEN);
