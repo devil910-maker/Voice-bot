@@ -1,35 +1,43 @@
-process.on('unhandledRejection', console.error);
-process.on('uncaughtException', console.error);
-
-import 'dotenv/config';
-import {
-  Client, GatewayIntentBits, Partials
-} from 'discord.js';
-import {
-  joinVoiceChannel,
-  createAudioPlayer,
-  createAudioResource,
-  getVoiceConnection,
-  EndBehaviorType
-} from '@discordjs/voice';
-import prism from 'prism-media';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import ffmpegPath from 'ffmpeg-static';
-import { spawn } from 'node:child_process';
-
-const TOKEN = process.env.TOKEN;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const USER_ID = '363853471516065823';   // ✅ 네 ID 고정
-
-if (!TOKEN) throw new Error('TOKEN 없음');
-if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY 없음');
+import { Client, GatewayIntentBits } from "discord.js";
+import dotenv from "dotenv/config.js";
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages
-  ],
-  partial
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+const TARGET_ID = process.env.TARGET_ID; // 너의 유저 ID
+const TOKEN = process.env.TOKEN; // 봇 토큰
+
+client.once("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+// 너가 음성채널 들어가면 → 봇도 따라옴
+client.on("voiceStateUpdate", async (oldState, newState) => {
+  try {
+    // 너가 음성채널에 "들어간 경우"
+    if (newState.member.id === TARGET_ID && newState.channel) {
+      const channel = newState.channel;
+      const connection = await channel.join();
+      console.log("🎧 들어감");
+    }
+
+    // 너가 음성채널에서 "나간 경우"
+    if (oldState.member.id === TARGET_ID && !newState.channel) {
+      const connection = oldState.channel?.guild?.me?.voice?.connection;
+      if (connection) {
+        connection.disconnect();
+        console.log("👋 나감");
+      }
+    }
+  } catch (err) {
+    console.error(err);
+  }
+});
+
+client.login(TOKEN);
