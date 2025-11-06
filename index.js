@@ -1,12 +1,23 @@
-import express from "express";
+import { Client, GatewayIntentBits } from "discord.js";
+import "dotenv/config";
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-  res.send("Bot Ready");
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildVoiceStates
+  ],
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+client.on("ready", () => {
+  console.log(`✅ 로그인 완료: ${client.user.tag}`);
 });
+
+client.on("messageCreate", (msg) => {
+  if (msg.content === "!핑") {
+    msg.reply("pong!");
+  }
+});
+
+client.login(process.env.TOKEN);
