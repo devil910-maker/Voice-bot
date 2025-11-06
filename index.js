@@ -1,3 +1,6 @@
+process.on('unhandledRejection', console.error);
+process.on('uncaughtException', console.error);
+
 import { Client, GatewayIntentBits } from "discord.js";
 import "dotenv/config";
 
@@ -6,7 +9,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
   ],
 });
 
