@@ -1,61 +1,45 @@
-import "dotenv/config.js";
-import {
-  Client,
-  GatewayIntentBits,
-  Events
-} from "discord.js";
-import {
-  joinVoiceChannel,
-  getVoiceConnection,
-  VoiceConnectionStatus,
-  entersState
-} from "@discordjs/voice";
+import 'dotenv/config';
+import express from "express";
+import { Client, GatewayIntentBits } from "discord.js";
+import { joinVoiceChannel, getVoiceConnection } from "@discordjs/voice";
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get("/", (_req, res) => res.send("OK"));
+app.listen(PORT, () => console.log(`[WEB] listening on ${PORT}`));
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
   ]
 });
 
-const TOKEN = process.env.TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
-client.once(Events.ClientReady, () => {
-  console.log(`✅ 봇 로그인됨: ${client.user.tag}`);
-});
-
-// ✅ 핵심: “내가 음성채널에 있는가” 기준으로 동작
-client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-
-  const meInVoice = newState.guild.members.cache.get(OWNER_ID)?.voice?.channel;
-
-  // 너가 음성채널에 **있다** → 봇도 그 채널에 있어야 함
-  if (meInVoice) {
-    const conn = getVoiceConnection(newState.guild.id);
-
-    if (!conn || conn.joinConfig.channelId !== meInVoice.id) {
-      joinVoiceChannel({
-        channelId: meInVoice.id,
-        guildId: newState.guild.id,
-        adapterCreator: newState.guild.voiceAdapterCreator,
-      });
-
-      console.log("🎧 주인님 위치 감지 → 봇 입장 / 이동");
-
-      // 연결 안정화 기다림
-      try { await entersState(conn, VoiceConnectionStatus.Ready, 5000); } catch {}
-    }
+client.on("voiceStateUpdate", (oldState, newState) => {
+  // 들어왔을 때 봇이 아님 + 방 입장
+  if (!oldState.channelId && newState.channelId && newState.id === OWNER_ID) {
+    joinVoiceChannel({
+      channelId: newState.channel.id,
+      guildId: newState.guild.id,
+      adapterCreator: newState.guild.voiceAdapterCreator
+    });
+    console.log(">>> 주인 입장 → 봇 따라감");
   }
 
-  // 너가 음성채널에 **없다** → 봇도 나감
-  else {
+  // 나갔을 때
+  if (oldState.channelId && !newState.channelId && oldState.id === OWNER_ID) {
     const conn = getVoiceConnection(oldState.guild.id);
-    if (conn) {
-      conn.destroy();
-      console.log("👋 주인님 없음 → 봇 퇴장");
-    }
+    if (conn) conn.destroy();
+    console.log(">>> 주인 퇴장 → 봇도 나감");
   }
 });
 
-client.login(TOKEN);
+client.once("ready", () => {
+  console.log(`✅ 로그인 완료: ${client.user.tag}`);
+});
+
+client.login(process.env.TOKEN);
