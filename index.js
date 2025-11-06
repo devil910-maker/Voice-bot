@@ -1,85 +1,129 @@
-// index.js  (완전체: 그대로 교체)
+// index.js
 import { Client, GatewayIntentBits, Events, ChannelType } from "discord.js";
+import {
+  joinVoiceChannel,
+  getVoiceConnection,
+  entersState,
+  VoiceConnectionStatus,
+} from "@discordjs/voice";
 import dotenv from "dotenv";
 import express from "express";
 
 dotenv.config();
 
-// ===== Render Web Service용 Keep-Alive HTTP 서버 =====
+// ---------- Render keep-alive ----------
 const app = express();
 app.get("/", (_req, res) => res.send("ok"));
 app.get("/health", (_req, res) => res.json({ ok: true }));
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`http server :${PORT}`));
 
-// ===== 디스코드 봇 =====
-const TOKEN = process.env.TOKEN;                 // 봇 토큰
-const GUILD_ID = process.env.GUILD_ID;           // 서버 ID
-const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID; // 기본 음성채널 ID (선택)
-const TARGET_USER_ID = process.env.TARGET_USER_ID;     // 따라갈 유저 ID
+// ---------- ENV ----------
+const TOKEN = process.env.TOKEN;                  // 봇 토큰
+const GUILD_ID = process.env.GUILD_ID;            // 서버 ID (옵션)
+const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID; // 기본 채널 (옵션)
+const TARGET_USER_ID = process.env.TARGET_USER_ID;      // 따라갈 유저 ID
 
+// ---------- Client ----------
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages
+    GatewayIntentBits.GuildVoiceStates, // 필수
   ],
 });
 
-async function tryFollow(targetState) {
+// ---------- helpers ----------
+function connectToVoice(channel) {
+  // 기존 연결 있으면 채널 비교 후 이동
+  const prev = getVoiceConnection(channel.guild.id);
+  if (prev) {
+    const same =
+      prev.joinConfig.channelId && prev.joinConfig.channelId === channel.id;
+    if (same) return prev;
+    try { prev.destroy(); } catch {}
+  }
+
+  const conn = joinVoiceChannel({
+    guildId: channel.guild.id,
+    channelId: channel.id,
+    adapterCreator: channel.guild.voiceAdapterCreator,
+    selfDeaf: true,
+    selfMute: false,
+  });
+  return conn;
+}
+
+async function followUser(newState) {
+  const ch = newState.channel;
+  if (!ch || ch.type !== ChannelType.GuildVoice) return;
+
+  // 이미 그 채널에 붙어있으면 패스
+  const conn = getVoiceConnection(ch.guild.id);
+  if (conn?.joinConfig.channelId === ch.id) return;
+
   try {
-    const channel = targetState.channel;
-    if (!channel || channel.type !== ChannelType.GuildVoice) return;
-
-    // 이미 같은 채널이면 패스
-    const me = targetState.guild.members.me;
-    if (me?.voice?.channelId === channel.id) return;
-
-    // 연결
-    await channel.join? channel.join() : null; // 구버전 가드
+    const c = connectToVoice(ch);
+    await entersState(c, VoiceConnectionStatus.Ready, 10_000);
+    console.log(`joined #${ch.name}`);
   } catch (e) {
-    console.error("follow error:", e?.message || e);
+    console.error("join error:", e?.message || e);
   }
 }
 
+function leaveIfWithTarget(oldState) {
+  const left = oldState.channelId && !oldState.newState?.channelId;
+  const wasTarget = oldState.member?.id === TARGET_USER_ID;
+  if (!left || !wasTarget) return;
+
+  const conn = getVoiceConnection(oldState.guild.id);
+  if (conn && conn.joinConfig.channelId === oldState.channelId) {
+    try {
+      conn.destroy();
+      console.log("left with target");
+    } catch (e) {
+      console.error("leave error:", e?.message || e);
+    }
+  }
+}
+
+// ---------- events ----------
 client.once(Events.ClientReady, async () => {
   console.log(`ready: ${client.user.tag}`);
-
-  // 봇이 들어오면 기본 채널로 입장(옵션)
   if (VOICE_CHANNEL_ID) {
     try {
       const ch = await client.channels.fetch(VOICE_CHANNEL_ID);
       if (ch?.type === ChannelType.GuildVoice) {
-        // voice adapter 방식이 필요하면 @discordjs/voice로 교체
-        // 여기선 단순 존재 체크만
-        console.log("default voice channel set:", VOICE_CHANNEL_ID);
+        console.log(`default voice channel: ${ch.name}`);
       }
     } catch {}
   }
 });
 
-// 대상 유저가 음성채널에 들어오면 따라가기
+// 유저 이동/입장 감지
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-  const joined = !oldState.channelId && newState.channelId; // 채널에 새로 진입
-  const moved  = oldState.channelId && newState.channelId && oldState.channelId !== newState.channelId;
+  // 대상 유저가 들어오거나 이동
+  if (
+    TARGET_USER_ID &&
+    newState.member?.id === TARGET_USER_ID &&
+    newState.channelId &&
+    oldState.channelId !== newState.channelId
+  ) {
+    await followUser(newState);
+  }
 
-  if (!(joined || moved)) return;
-  if (!TARGET_USER_ID) return;
-  if (newState.member?.id !== TARGET_USER_ID) return;
-
-  await tryFollow(newState);
-});
-
-// 대상 유저가 나가면 같이 나가기(봇이 같은 채널일 때)
-client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
-  const left = oldState.channelId && !newState.channelId;
-  if (!left) return;
-  if (oldState.member?.id !== TARGET_USER_ID) return;
-
-  const me = newState.guild.members.me;
-  if (me?.voice?.channelId === oldState.channelId) {
-    try { await me.voice.disconnect(); } catch (e) { console.error("leave error:", e?.message || e); }
+  // 대상 유저가 나감
+  if (TARGET_USER_ID && oldState.member?.id === TARGET_USER_ID) {
+    const actuallyLeft = oldState.channelId && !newState.channelId;
+    if (actuallyLeft) leaveIfWithTarget(oldState);
   }
 });
+
+// 안전 종료
+for (const sig of ["SIGINT", "SIGTERM"]) {
+  process.on(sig, () => {
+    try { getVoiceConnection(GUILD_ID || "")?.destroy(); } catch {}
+    process.exit(0);
+  });
+}
 
 client.login(TOKEN);
