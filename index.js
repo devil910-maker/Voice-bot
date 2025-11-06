@@ -1,42 +1,43 @@
 import { Client, GatewayIntentBits } from "discord.js";
 import dotenv from "dotenv/config.js";
+import {
+  joinVoiceChannel,
+  getVoiceConnection,
+} from "@discordjs/voice";
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent
   ]
 });
 
-const TARGET_ID = process.env.TARGET_ID; // 너의 유저 ID
-const TOKEN = process.env.TOKEN; // 봇 토큰
+const TOKEN = process.env.TOKEN;
+const TARGET_ID = process.env.TARGET_ID;
 
 client.once("ready", () => {
   console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// 너가 음성채널 들어가면 → 봇도 따라옴
-client.on("voiceStateUpdate", async (oldState, newState) => {
-  try {
-    // 너가 음성채널에 "들어간 경우"
-    if (newState.member.id === TARGET_ID && newState.channel) {
-      const channel = newState.channel;
-      const connection = await channel.join();
-      console.log("🎧 들어감");
-    }
+client.on("voiceStateUpdate", (oldState, newState) => {
 
-    // 너가 음성채널에서 "나간 경우"
-    if (oldState.member.id === TARGET_ID && !newState.channel) {
-      const connection = oldState.channel?.guild?.me?.voice?.connection;
-      if (connection) {
-        connection.disconnect();
-        console.log("👋 나감");
-      }
+  // 들어감
+  if (newState.member.id === TARGET_ID && newState.channel) {
+    joinVoiceChannel({
+      channelId: newState.channel.id,
+      guildId: newState.guild.id,
+      adapterCreator: newState.guild.voiceAdapterCreator
+    });
+    console.log("🎧 따라 들어감");
+  }
+
+  // 나감
+  if (oldState.member.id === TARGET_ID && !newState.channel) {
+    const connection = getVoiceConnection(oldState.guild.id);
+    if (connection) {
+      connection.destroy();
+      console.log("👋 따라 나감");
     }
-  } catch (err) {
-    console.error(err);
   }
 });
 
